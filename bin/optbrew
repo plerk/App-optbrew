@@ -5,4 +5,8 @@ use warnings;
 use v5.10;
 use App::optbrew;
 
+# PODNAME: optbrew
+# ABSTRACT: Brew for ~/opt
+# VERSION
+
 exit App::optbrew->main(@ARGV);

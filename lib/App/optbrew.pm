@@ -36,6 +36,11 @@ opt suffix => (
   comment => 'Suffix to attach to version number',
 );
 
+opt replace => (
+  isa     => 'Bool',
+  comment => 'Replace an existing coponent if it already exists',
+);
+
 arg url => (
   isa      => 'Str',
   comment  => 'The URL',
@@ -170,7 +175,7 @@ sub run
   
   if(-d $root)
   {
-    if(-r $root->file('.fail'))
+    if(-r $root->file('.fail') || $opt->{replace})
     {
       require File::Path;
       File::Path::remove_tree($root, { verbose => 0, error => \my $err });
@@ -225,6 +230,28 @@ sub run
       die "build failed" if $?;
     }
   };
+
+  my $basename;  
+  if($url->isa('URI'))
+  {
+    $basename = $url->path;
+    $basename =~ s{^.*/}{};
+  }
+  else
+  {
+    $basename = $url->basename
+  }
+
+  $src = $src->parent;
+
+  if(ref($content))
+  {
+    $src->file($basename)->spew($$content);
+  }
+  else
+  {
+    Path::Class::File->new($content)->copy_to($src->file($basename));
+  }
   
   $root->file('.fail')->remove;
 }
@@ -311,6 +338,8 @@ sub extract
     { warn archive_error_string($a) }
     elsif($r != ARCHIVE_OK)
     { die archive_error_string($a) }
+
+    next unless archive_entry_size($e) > 0;
     
     while(1)
     {

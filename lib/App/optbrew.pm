@@ -82,30 +82,38 @@ use URI;
 use URI::file;
 use File::chdir;
 use Net::FTP;
+use Path::Class::Dir;
+use Path::Class::File;
 
 sub run
 {
   my $opt = shift;
-  my $tmp = tempdir( CLEANUP => 1);
   
   my $url  = $opt->{url};
   my $configure_args = '';
+
   if($url =~ /^(.*?)\s+(.*)$/)
   {
     ($url, $configure_args) = ($1, $2);
   }
-  if(-r $url)
+
+  if(-r $url || $url !~ /^(https?|ftp):/)
   {
-    $url = URI::file->new($url);
+    $url = Path::Class::File->new($url)->absolute;
   }
   else
   {
     $url = URI->new($url);
+    $url = Path::Class::File->new($url->path) if $url->scheme eq 'file';
+    
   }
   
-  # TODO: support ftp, file
   my $content;
-  if($url->scheme =~ /^https?$/)
+  if($url->isa('Path::Class::File'))
+  {
+    $content = "$url";
+  }
+  elsif($url->scheme =~ /^https?$/)
   {
     say "FETCH $url";
     my $http = HTTP::Tiny->new->get($url);
@@ -114,10 +122,6 @@ sub run
       unless $http->{success};
     
     $content = \$http->{content};
-  }
-  elsif($url->scheme eq 'file')
-  {
-    $content = $url->path;
   }
   elsif($url->scheme eq 'ftp')
   {
@@ -137,10 +141,30 @@ sub run
     die "scheme not supported: " . $url->scheme;
   }
   
+  local $|=1;
+
+  if($^O eq 'MSWin32' && ref($content))
+  {
+    print "TMPIFYING (windows only) ";
+    my $file = Path::Class::Dir->new(tempdir( CLEANUP => 1))->file('archive');
+    $file->spew(iomode => '>:raw', $$content);
+    $content = "$file";
+    say $file;
+  }
+
+  print "NAME ";
   my($name, $version) = find_name_and_version($content);
+  print " $name $version";
 
   $name     = $opt->{name}   if defined $opt->{name};
   $version .= $opt->{suffix} if defined $opt->{suffix};
+  
+  if(defined $opt->{name} || defined $opt->{suffix})
+  {
+    print " => $name $version";
+  }
+  
+  print "\n";
   
   my $root = App::optbrew->root->subdir($name, $version);
   
@@ -179,7 +203,9 @@ sub run
     my $script = $src->parent->file($src->basename . ".sh");
     my $fh = $script->openw(">");
     say $fh "#!/bin/sh";
-    say $fh "sh configure --prefix=$root $configure_args && \\";
+    my $prefix = "$root";
+    $prefix =~ s{\\}{/}g;
+    say $fh "sh configure --prefix=$prefix $configure_args && \\";
     say $fh "make && \\";
     say $fh "make install";
     close $fh;
